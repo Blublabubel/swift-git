@@ -1,19 +1,76 @@
 import Foundation
-import CommonCrypto
-import zlib
 
 // MARK: - Git Repository Structure
 
+/**
+ * GitRepository represents a Git repository and provides core Git functionality.
+ * 
+ * A Git repository is a directory that contains:
+ * - `.swiftgit/` directory (equivalent to `.git/` in standard Git)
+ * - Working directory files
+ * - Staging area (index)
+ * - Object database
+ * 
+ * Example usage:
+ * ```swift
+ * let repo = GitRepository(path: "/path/to/project")
+ * try repo.initialize()  // Creates new repository
+ * try repo.add(files: ["file1.txt", "file2.swift"])  // Stage files
+ * try repo.commit(message: "Initial commit")  // Create commit
+ * ```
+ */
 struct GitRepository {
+    /// The root path of the repository (working directory)
     let path: String
+    
+    /// The path to the Git metadata directory (`.swiftgit/`)
     let gitDir: String
     
+    /**
+     * Initialize a new GitRepository instance.
+     * 
+     * @param path The root directory path for the repository
+     * 
+     * Example:
+     * ```swift
+     * let repo = GitRepository(path: "/Users/developer/my-project")
+     * // gitDir will be "/Users/developer/my-project/.swiftgit"
+     * ```
+     */
     init(path: String) {
         self.path = path
         self.gitDir = "\(path)/.swiftgit"
     }
     
+    /**
+     * Initialize a new Git repository by creating the necessary directory structure.
+     * 
+     * This method creates the following structure:
+     * ```
+     * .swiftgit/
+     * ├── objects/          # Object database (blobs, trees, commits)
+     * ├── refs/
+     * │   ├── heads/        # Branch references
+     * │   └── tags/         # Tag references
+     * ├── HEAD              # Points to current branch
+     * └── config            # Repository configuration
+     * ```
+     * 
+     * Example:
+     * ```swift
+     * let repo = GitRepository(path: ".")
+     * try repo.initialize()
+     * // Creates .swiftgit/ directory with all necessary subdirectories
+     * ```
+     * 
+     * @throws File system errors if directories cannot be created
+     */
     func initialize() throws {
+        // Check if .swiftgit directory already exists
+        if FileManager.default.fileExists(atPath: gitDir) {
+            throw GitError.gitRepositoryAlreadyExists
+        }
+        
         // Create .git directory structure
         let directories = [
             gitDir,
@@ -28,10 +85,13 @@ struct GitRepository {
         }
         
         // Create HEAD file pointing to main branch
+        // HEAD is a symbolic reference that points to the current branch
+        // Example HEAD content: "ref: refs/heads/main"
         let headContent = "ref: refs/heads/main\n"
         try headContent.write(toFile: "\(gitDir)/HEAD", atomically: true, encoding: .utf8)
         
-        // Create config file
+        // Create config file with basic repository settings
+        // This config file contains repository metadata and user information
         let configContent = """
         [core]
         \trepositoryformatversion = 0
@@ -47,6 +107,27 @@ struct GitRepository {
         print("Initialized empty Git repository in \(gitDir)")
     }
     
+    /**
+     * Add files to the staging area (index).
+     * 
+     * The staging area is a snapshot of the working directory that will be included
+     * in the next commit. Files are stored as blob objects in the object database.
+     * 
+     * Git object types:
+     * - **Blob**: File content (e.g., source code, text files)
+     * - **Tree**: Directory structure (contains references to blobs and other trees)
+     * - **Commit**: Snapshot of the repository at a point in time
+     * 
+     * Example:
+     * ```swift
+     * let repo = GitRepository(path: ".")
+     * try repo.add(files: ["src/main.swift", "README.md"])
+     * // Files are now staged and ready for commit
+     * ```
+     * 
+     * @param files Array of file paths to add to staging area
+     * @throws File system errors if files cannot be read or written
+     */
     func add(files: [String]) throws {
         let index = GitIndex(repository: self)
         
@@ -62,6 +143,33 @@ struct GitRepository {
         try index.write()
     }
     
+    /**
+     * Create a new commit from the staged changes.
+     * 
+     * A commit represents a snapshot of the repository at a specific point in time.
+     * Each commit contains:
+     * - Tree object (directory structure)
+     * - Parent commit(s) (for history)
+     * - Author and committer information
+     * - Commit message
+     * 
+     * Commit creation process:
+     * 1. Create tree object from staged files
+     * 2. Create commit object referencing the tree
+     * 3. Update HEAD to point to the new commit
+     * 
+     * Example:
+     * ```swift
+     * let repo = GitRepository(path: ".")
+     * try repo.add(files: ["main.swift"])
+     * try repo.commit(message: "Add initial implementation")
+     * // Creates commit with hash like "a1b2c3d..."
+     * ```
+     * 
+     * @param message The commit message describing the changes
+     * @throws GitError.noChangesToCommit if no files are staged
+     * @throws File system errors if objects cannot be created
+     */
     func commit(message: String) throws {
         let index = GitIndex(repository: self)
         try index.read()
@@ -71,9 +179,11 @@ struct GitRepository {
         }
         
         // Create tree object from staged files
+        // Tree objects represent directory structure and contain references to blobs
         let treeHash = try createTreeObject(from: index.entries)
         
         // Create commit object
+        // Commit objects contain metadata about the snapshot
         let commitHash = try createCommitObject(
             treeHash: treeHash,
             message: message,
@@ -81,12 +191,42 @@ struct GitRepository {
         )
         
         // Update HEAD to point to new commit
+        // This moves the current branch pointer to the new commit
         try updateHEAD(to: commitHash)
         
         print("Created commit \(commitHash.prefix(7))")
         print("  \(message)")
     }
     
+    /**
+     * Create a blob object from file data and store it in the object database.
+     * 
+     * Blob objects store the actual content of files. Each blob is:
+     * - Compressed using zlib
+     * - Stored in `.swiftgit/objects/` with a path based on its SHA1 hash
+     * - Referenced by other objects (trees, commits) using the hash
+     * 
+     * Object storage layout:
+     * ```
+     * .swiftgit/objects/
+     * ├── a1/           # First two characters of hash
+     * │   └── b2c3d...  # Remaining hash characters
+     * └── e5/
+     *     └── f6g7h...
+     * ```
+     * 
+     * Example:
+     * ```swift
+     * let fileData = "Hello, World!".data(using: .utf8)!
+     * let hash = calculateSHA1(fileData)  // "a1b2c3d..."
+     * try repo.createBlob(data: fileData, hash: hash)
+     * // Creates file at .swiftgit/objects/a1/b2c3d...
+     * ```
+     * 
+     * @param data The file content as Data
+     * @param hash The SHA1 hash of the data
+     * @throws File system errors if object cannot be written
+     */
     func createBlob(data: Data, hash: String) throws {
         let objectPath = "\(gitDir)/objects/\(hash.prefix(2))/\(hash.dropFirst(2))"
         let objectDir = "\(gitDir)/objects/\(hash.prefix(2))"
@@ -95,6 +235,8 @@ struct GitRepository {
         try FileManager.default.createDirectory(atPath: objectDir, withIntermediateDirectories: true)
         
         // Prepare blob content
+        // Git object format: "type size\0content"
+        // Example: "blob 13\0Hello, World!"
         let blobContent = "blob \(data.count)\0"
         var fullContent = Data()
         fullContent.append(contentsOf: blobContent.utf8)
@@ -105,36 +247,93 @@ struct GitRepository {
         try compressed.write(to: URL(fileURLWithPath: objectPath))
     }
     
+    /**
+     * Create a tree object from index entries.
+     * 
+     * Tree objects represent directory structure and contain:
+     * - File mode (permissions)
+     * - File name
+     * - SHA1 hash of the blob or subtree
+     * 
+     * Tree format: "mode name\0hash"
+     * Example tree content:
+     * ```
+     * 100644 main.swift\0a1b2c3d...
+     * 100644 README.md\0e5f6g7h...
+     * 040000 src\0i9j0k1l...
+     * ```
+     * 
+     * @param entries Array of GitIndexEntry objects representing staged files
+     * @return SHA1 hash of the created tree object
+     * @throws File system errors if tree cannot be created
+     */
     private func createTreeObject(from entries: [GitIndexEntry]) throws -> String {
-        // Group entries by directory
-        var treeEntries: [String: [GitIndexEntry]] = [:]
+        // Create tree recursively starting from root level
+        return try createTreeRecursive(entries: entries, currentLevel: 0)
+    }
+    
+    /**
+     * Create a tree object recursively, handling any depth of nested directories.
+     * 
+     * This method recursively processes files at each directory level:
+     * - Files at current level go directly into the tree
+     * - Files in subdirectories are grouped and processed recursively
+     * 
+     * Example for path "src/utils/helpers/helper.swift":
+     * - Level 0: Groups by "src"
+     * - Level 1: Inside "src", groups by "utils" 
+     * - Level 2: Inside "src/utils", groups by "helpers"
+     * - Level 3: Inside "src/utils/helpers", adds "helper.swift" as file
+     * 
+     * @param entries All file entries to process
+     * @param currentLevel Current directory depth (0 = root)
+     * @return SHA1 hash of the created tree object
+     */
+    private func createTreeRecursive(entries: [GitIndexEntry], currentLevel: Int) throws -> String {
+        var files: [GitIndexEntry] = []
+        var subdirs: [String: [GitIndexEntry]] = [:]
         
+        // Group entries by current level
         for entry in entries {
             let components = entry.path.split(separator: "/")
-            if components.count == 1 {
-                // File in root directory
-                treeEntries[""] = (treeEntries[""] ?? []) + [entry]
-            } else {
-                // File in subdirectory
-                let dir = String(components[0])
-                treeEntries[dir] = (treeEntries[dir] ?? []) + [entry]
+            
+            if components.count == currentLevel + 1 {
+                // File at current level
+                files.append(entry)
+            } else if components.count > currentLevel + 1 {
+                // File in subdirectory at current level
+                let subdirName = String(components[currentLevel])
+                subdirs[subdirName, default: []].append(entry)
             }
         }
         
         // Create tree content
         var treeContent = Data()
         
-        for (dir, dirEntries) in treeEntries {
-            for entry in dirEntries {
-                let mode = "100644" // Regular file mode
-                let name = dir.isEmpty ? entry.path : String(entry.path.split(separator: "/").last!)
-                let hash = entry.sha1
-                
-                // Format: mode name\0hash
-                let line = "\(mode) \(name)\0"
-                treeContent.append(contentsOf: line.utf8)
-                treeContent.append(contentsOf: hash.utf8)
-            }
+        // Add files at current level
+        for entry in files {
+            let components = entry.path.split(separator: "/")
+            let fileName = String(components.last!) // Get just the filename
+            
+            let mode = "100644" // Regular file mode
+            let hash = entry.sha1
+            
+            // Format: mode name\0hash
+            let line = "\(mode) \(fileName)\0"
+            treeContent.append(contentsOf: line.utf8)
+            treeContent.append(contentsOf: hash.utf8)
+        }
+        
+        // Process subdirectories recursively
+        for (subdirName, subdirEntries) in subdirs {
+            // Create tree object for this subdirectory
+            let subTreeHash = try createTreeRecursive(entries: subdirEntries, currentLevel: currentLevel + 1)
+            
+            // Add subdirectory to current tree
+            let mode = "040000" // Directory mode
+            let line = "\(mode) \(subdirName)\0"
+            treeContent.append(contentsOf: line.utf8)
+            treeContent.append(contentsOf: subTreeHash.utf8)
         }
         
         // Compress and store tree object
@@ -148,6 +347,40 @@ struct GitRepository {
         return hash
     }
     
+    /**
+     * Create a commit object from tree hash and metadata.
+     * 
+     * Commit objects contain:
+     * - Tree hash (snapshot of working directory)
+     * - Parent commit hash(es) (for history)
+     * - Author and committer information
+     * - Commit message
+     * 
+     * Commit format:
+     * ```
+     * tree <tree-hash>
+     * parent <parent-hash>
+     * author <name> <email> <timestamp> <timezone>
+     * committer <name> <email> <timestamp> <timezone>
+     * 
+     * <commit-message>
+     * ```
+     * 
+     * Example commit content:
+     * ```
+     * tree a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
+     * author John Doe <john@example.com> 1640995200 +0000
+     * committer John Doe <john@example.com> 1640995200 +0000
+     * 
+     * Initial commit
+     * ```
+     * 
+     * @param treeHash SHA1 hash of the tree object
+     * @param message Commit message
+     * @param parentHash SHA1 hash of parent commit (nil for initial commit)
+     * @return SHA1 hash of the created commit object
+     * @throws File system errors if commit cannot be created
+     */
     private func createCommitObject(treeHash: String, message: String, parentHash: String?) throws -> String {
         var commitContent = ""
         
@@ -178,6 +411,20 @@ struct GitRepository {
         return hash
     }
     
+    /**
+     * Get the current commit hash by reading HEAD and resolving the reference.
+     * 
+     * HEAD can be either:
+     * - A symbolic reference: "ref: refs/heads/main"
+     * - A direct commit hash: "a1b2c3d..."
+     * 
+     * Example HEAD resolution:
+     * 1. Read HEAD: "ref: refs/heads/main"
+     * 2. Read refs/heads/main: "a1b2c3d..."
+     * 3. Return "a1b2c3d..."
+     * 
+     * @return SHA1 hash of current commit, or nil if no commits exist
+     */
     private func getCurrentCommitHash() -> String? {
         do {
             let headContent = try String(contentsOfFile: "\(gitDir)/HEAD", encoding: .utf8)
@@ -195,314 +442,26 @@ struct GitRepository {
         return nil
     }
     
+    /**
+     * Update HEAD to point to the new commit hash.
+     * 
+     * This method:
+     * 1. Updates HEAD to point to the main branch
+     * 2. Updates the main branch reference to point to the new commit
+     * 
+     * Example:
+     * ```swift
+     * try updateHEAD(to: "a1b2c3d...")
+     * // HEAD now points to main branch
+     * // refs/heads/main now contains "a1b2c3d..."
+     * ```
+     * 
+     * @param commitHash SHA1 hash of the commit to point to
+     * @throws File system errors if references cannot be updated
+     */
     private func updateHEAD(to commitHash: String) throws {
         let headContent = "ref: refs/heads/main\n"
         try headContent.write(toFile: "\(gitDir)/HEAD", atomically: true, encoding: .utf8)
         try commitHash.write(toFile: "\(gitDir)/refs/heads/main", atomically: true, encoding: .utf8)
     }
-}
-
-
-// MARK: - Git Index
-
-struct GitIndexEntry {
-    let path: String
-    let sha1: String
-    let size: Int
-    let mtime: Date
-    let mode: UInt32
-    let stage: UInt32
-}
-
-class GitIndex {
-    let repository: GitRepository
-    var entries: [GitIndexEntry] = []
-    
-    init(repository: GitRepository) {
-        self.repository = repository
-    }
-    
-    func addFile(_ path: String) throws {
-        let fileData = try Data(contentsOf: URL(fileURLWithPath: path))
-        let sha1 = calculateSHA1(fileData)
-        
-        // Store the blob object
-        try repository.createBlob(data: fileData, hash: sha1)
-        
-        let attributes = try FileManager.default.attributesOfItem(atPath: path)
-        let mtime = attributes[.modificationDate] as? Date ?? Date()
-        
-        // Determine file mode (100644 for regular files, 100755 for executables)
-        let mode: UInt32 = 100644 // Default to regular file
-        
-        let entry = GitIndexEntry(
-            path: path,
-            sha1: sha1,
-            size: fileData.count,
-            mtime: mtime,
-            mode: mode,
-            stage: 0 // Normal stage
-        )
-        
-        // Remove existing entry if exists
-        entries.removeAll { $0.path == path }
-        entries.append(entry)
-    }
-    
-    func removeFile(_ path: String) {
-        entries.removeAll { $0.path == path }
-    }
-    
-    func read() throws {
-        let indexPath = "\(repository.gitDir)/index"
-        guard FileManager.default.fileExists(atPath: indexPath) else {
-            entries = []
-            return
-        }
-        
-        let data = try Data(contentsOf: URL(fileURLWithPath: indexPath))
-        try parseIndex(data: data)
-    }
-    
-    func write() throws {
-        let indexPath = "\(repository.gitDir)/index"
-        let data = try serializeIndex()
-        try data.write(to: URL(fileURLWithPath: indexPath))
-    }
-    
-    private func parseIndex(data: Data) throws {
-        entries = []
-        
-        guard data.count >= 12 else {
-            throw GitError.invalidIndexFormat
-        }
-        
-        var offset = 0
-        
-        // Read header
-        let magic = data[offset..<offset+4]
-        guard String(data: magic, encoding: .ascii) == "DIRC" else {
-            throw GitError.invalidIndexFormat
-        }
-        offset += 4
-        
-        let version = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
-        offset += 4
-        
-        let entryCount = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
-        offset += 4
-        
-        // Read entries
-        for _ in 0..<entryCount {
-            guard offset + 62 <= data.count else {
-                throw GitError.invalidIndexFormat
-            }
-            
-            let entry = try parseIndexEntry(data: data, offset: &offset)
-            entries.append(entry)
-        }
-    }
-    
-    private func parseIndexEntry(data: Data, offset: inout Int) throws -> GitIndexEntry {
-        // Read entry header (62 bytes)
-        let ctime = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
-        offset += 4
-        let ctimeNano = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
-        offset += 4
-        let mtime = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
-        offset += 4
-        let mtimeNano = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
-        offset += 4
-        let dev = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
-        offset += 4
-        let ino = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
-        offset += 4
-        let mode = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
-        offset += 4
-        let uid = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
-        offset += 4
-        let gid = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
-        offset += 4
-        let fileSize = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
-        offset += 4
-        
-        // Read SHA1 hash (20 bytes)
-        let sha1Data = data[offset..<offset+20]
-        let sha1 = sha1Data.map { String(format: "%02hhx", $0) }.joined()
-        offset += 20
-        
-        // Read flags
-        let flags = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt16.self).bigEndian }
-        offset += 2
-        
-        // Read path length
-        let pathLength = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt16.self).bigEndian }
-        offset += 2
-        
-        // Read path
-        let pathData = data[offset..<offset+Int(pathLength)]
-        guard let path = String(data: pathData, encoding: .utf8) else {
-            throw GitError.invalidIndexFormat
-        }
-        offset += Int(pathLength)
-        
-        // Align to 8-byte boundary
-        let padding = (8 - (offset % 8)) % 8
-        offset += padding
-        
-        let stage = (flags >> 12) & 0x3
-        let mtimeDate = Date(timeIntervalSince1970: TimeInterval(mtime))
-        
-        return GitIndexEntry(
-            path: path,
-            sha1: sha1,
-            size: Int(fileSize),
-            mtime: mtimeDate,
-            mode: mode,
-            stage: UInt32(stage)
-        )
-    }
-    
-    private func serializeIndex() throws -> Data {
-        var data = Data()
-        
-        // Write header
-        data.append(contentsOf: "DIRC".utf8) // Magic number
-        data.append(withUnsafeBytes(of: UInt32(2).bigEndian) { Data($0) }) // Version
-        data.append(withUnsafeBytes(of: UInt32(entries.count).bigEndian) { Data($0) }) // Entry count
-        
-        // Write entries
-        for entry in entries {
-            data.append(try serializeIndexEntry(entry))
-        }
-        
-        // Calculate and write index checksum
-        let indexSha1 = calculateSHA1(data)
-        let indexSha1Data = Data(hexString: indexSha1) ?? Data()
-        data.append(indexSha1Data)
-        
-        return data
-    }
-    
-    private func serializeIndexEntry(_ entry: GitIndexEntry) throws -> Data {
-        var data = Data()
-        
-        // Write entry header (62 bytes)
-        let mtime = UInt32(entry.mtime.timeIntervalSince1970)
-        let ctime = mtime // Use same time for creation
-        
-        data.append(withUnsafeBytes(of: ctime.bigEndian) { Data($0) }) // ctime
-        data.append(withUnsafeBytes(of: UInt32(0).bigEndian) { Data($0) }) // ctime nanoseconds
-        data.append(withUnsafeBytes(of: mtime.bigEndian) { Data($0) }) // mtime
-        data.append(withUnsafeBytes(of: UInt32(0).bigEndian) { Data($0) }) // mtime nanoseconds
-        data.append(withUnsafeBytes(of: UInt32(0).bigEndian) { Data($0) }) // dev
-        data.append(withUnsafeBytes(of: UInt32(0).bigEndian) { Data($0) }) // ino
-        data.append(withUnsafeBytes(of: entry.mode.bigEndian) { Data($0) }) // mode
-        data.append(withUnsafeBytes(of: UInt32(0).bigEndian) { Data($0) }) // uid
-        data.append(withUnsafeBytes(of: UInt32(0).bigEndian) { Data($0) }) // gid
-        data.append(withUnsafeBytes(of: UInt32(entry.size).bigEndian) { Data($0) }) // file size
-        
-        // Write SHA1 hash
-        let sha1Data = Data(hexString: entry.sha1) ?? Data()
-        data.append(sha1Data)
-        
-        // Write flags
-        let flags = UInt16(entry.stage << 12)
-        data.append(withUnsafeBytes(of: flags.bigEndian) { Data($0) })
-        
-        // Write path length
-        let pathData = entry.path.data(using: .utf8) ?? Data()
-        data.append(withUnsafeBytes(of: UInt16(pathData.count).bigEndian) { Data($0) })
-        
-        // Write path
-        data.append(pathData)
-        
-        // Add padding to align to 8-byte boundary
-        let padding = (8 - (data.count % 8)) % 8
-        data.append(contentsOf: Array(repeating: UInt8(0), count: padding))
-        
-        return data
-    }
-}
-
-// MARK: - Data Extensions
-
-extension Data {
-    init?(hexString: String) {
-        guard hexString.count % 2 == 0 else { return nil }
-        
-        var data = Data()
-        var index = hexString.startIndex
-        
-        while index < hexString.endIndex {
-            let nextIndex = hexString.index(index, offsetBy: 2)
-            let byteString = hexString[index..<nextIndex]
-            
-            guard let byte = UInt8(byteString, radix: 16) else { return nil }
-            data.append(byte)
-            
-            index = nextIndex
-        }
-        
-        self = data
-    }
-}
-
-// MARK: - Errors
-
-enum GitError: Error, LocalizedError {
-    case noChangesToCommit
-    case notAGitRepository
-    case invalidIndexFormat
-    
-    var errorDescription: String? {
-        switch self {
-        case .noChangesToCommit:
-            return "No changes to commit"
-        case .notAGitRepository:
-            return "Not a git repository"
-        case .invalidIndexFormat:
-            return "Invalid index file format"
-        }
-    }
-}
-
-// MARK: - Utilities
-
-func calculateSHA1(_ data: Data) -> String {
-    var digest = [UInt8](repeating: 0, count: Int(CC_SHA1_DIGEST_LENGTH))
-    data.withUnsafeBytes { buffer in
-        _ = CC_SHA1(buffer.baseAddress, CC_LONG(buffer.count), &digest)
-    }
-    return digest.map { String(format: "%02hhx", $0) }.joined()
-}
-
-func compressData(_ data: Data) throws -> Data {
-    // Simple compression using zlib
-    let compressed = data.withUnsafeBytes { buffer in
-        let source = buffer.bindMemory(to: UInt8.self)
-        let destination = UnsafeMutablePointer<UInt8>.allocate(capacity: data.count * 2)
-        defer { destination.deallocate() }
-        
-        var stream = z_stream()
-        stream.zalloc = nil
-        stream.zfree = nil
-        stream.opaque = nil
-        stream.avail_in = uInt(data.count)
-        stream.next_in = UnsafeMutablePointer(mutating: source.baseAddress)
-        stream.avail_out = uInt(data.count * 2)
-        stream.next_out = destination
-        
-        let result = deflateInit2_(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
-        guard result == Z_OK else {
-            return Data()
-        }
-        
-        deflate(&stream, Z_FINISH)
-        deflateEnd(&stream)
-        
-        return Data(bytes: destination, count: data.count * 2 - Int(stream.avail_out))
-    }
-    
-    return compressed
 }

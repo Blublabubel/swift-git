@@ -1,160 +1,283 @@
-# 🚀 SwiftGit
+# Swift Git
 
-> **A Git implementation in Swift for learning Git internals**
+A Git implementation written in Swift, demonstrating the core concepts and internals of Git version control.
 
-[![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)]()
+## Overview
 
-**SwiftGit** is a complete implementation of Git's core functionality written in Swift. This project demonstrates how Git works under the hood by implementing the fundamental concepts: object storage, staging area, commits, and more.
+Swift Git is an educational implementation of Git that provides basic version control functionality including repository initialization, file staging, and commit creation. It's designed to help developers understand how Git works under the hood by implementing the core concepts in a clear, readable way.
 
-## 🌟 Why This Project?
+## Features
 
-- **🧠 Learn Git Internals**: Understand how Git actually works, not just how to use it
-- **💡 Educational Value**: Perfect for developers who want to dive deep into version control systems
-- **🔧 Hands-on Experience**: Build your own Git-like system from scratch
-- **📚 Real-world Implementation**: See Git concepts implemented in modern Swift
+- **Repository Initialization**: Create new Git repositories with proper directory structure
+- **File Staging**: Add files to the staging area (index)
+- **Commit Creation**: Create commits with full metadata and history
+- **Object Database**: Store blobs, trees, and commits using SHA1 hashing
+- **Binary Index Format**: Implement Git's index file format for staging area
 
-## ✨ Features
-
-### 🎯 Core Git Operations
-- **`init`** - Initialize a new Git repository
-- **`add`** - Stage files for commit
-- **`commit`** - Create commits with proper object storage
-
-### 🔧 Git Internals Implemented
-- **Object Storage**: Blob, tree, and commit objects
-- **Index Management**: Binary index file with proper Git format
-- **SHA1 Hashing**: Content-addressable storage
-- **Zlib Compression**: Efficient object storage
-- **Reference Management**: HEAD and branch pointers
-
-### 📁 Repository Structure
-```
-.swiftgit/
-├── objects/          # Git objects (blobs, trees, commits)
-│   ├── 8a/b686...   # Content-addressable storage
-│   └── ...
-├── refs/
-│   └── heads/       # Branch references
-├── HEAD             # Current branch pointer
-├── config           # Repository configuration
-└── index            # Staging area (binary format)
-```
-
-## 🚀 Quick Start
+## Installation
 
 ### Prerequisites
-- Swift 5.9+
-- macOS (for CommonCrypto and zlib)
 
-### Run SwiftGit
-   ```bash
-   # Initialize a new repository
-   swift run SwiftGit init
-   
-   # Add files to staging
-   echo 'Hello, World!' > file.txt
-   swift run SwiftGit add file.txt
-   
-   # Create a commit
-   swift run SwiftGit commit -m "Initial commit"
-   ```
+- Swift 5.5 or later
+- macOS (for CommonCrypto and zlib support)
 
-### Command Reference
+### Building
 
 ```bash
-# Initialize repository
-SwiftGit init [directory]
-
-# Add files to staging
-SwiftGit add <file1> <file2> ...
-
-# Create commit
-SwiftGit commit -m "Commit message"
-```
-
-## 🔍 How It Works
-
-### Git Object Model
-SwiftGit implements Git's core object model:
-
-1. **Blob Objects**: Store file contents
-2. **Tree Objects**: Store directory structure
-3. **Commit Objects**: Store commit metadata and references
-
-### Staging Area
-The index file maintains the staging area using Git's binary format:
-- Tracks staged files and their metadata
-- Stores SHA1 hashes of file contents
-- Maintains file permissions and timestamps
-
-### Object Storage
-Files are stored using Git's content-addressable storage:
-- SHA1 hash determines object location
-- Objects are compressed using zlib
-- Directory structure: `objects/XX/YYYY...`
-
-## 🎓 Learning Resources
-
-This project is perfect for learning:
-
-- **Git Internals**: How Git stores data and manages history
-- **Version Control Systems**: Core concepts of VCS design
-- **Swift Programming**: Advanced Swift features and system programming
-- **Binary File Formats**: Understanding complex file structures
-- **Cryptographic Hashing**: SHA1 and content-addressable storage
-
-## 🔧 Technical Details
-
-### Dependencies
-- **Swift Argument Parser**: Command-line interface
-- **CommonCrypto**: SHA1 hashing
-- **zlib**: Object compression
-
-### Architecture
-- **Modular Design**: Separate components for different Git operations
-- **Error Handling**: Comprehensive error types and messages
-- **Binary Compatibility**: Implements actual Git file formats
-
-## 🤝 Contributing
-
-Contributions are welcome! This is a learning project, so feel free to:
-
-- 🐛 Report bugs
-- 💡 Suggest new features
-- 📝 Improve documentation
-- 🔧 Add new Git commands
-- 🧪 Add tests
-
-### Development Setup
-```bash
-git clone https://github.com/banghuazhao/swift-git.git
+# Clone the repository
+git clone <repository-url>
 cd swift-git
+
+# Build the project
 swift build
+
+# Run the executable
+swift run swift-git --help
 ```
 
-## 📚 Related Projects
+## Usage
 
-- [Git from the Bottom Up](https://jwiegley.github.io/git-from-the-bottom-up/)
-- [Git Internals](https://git-scm.com/book/en/v2/Git-Internals-Plumbing-and-Porcelain)
-- [Building Git](https://shop.jcoglan.com/building-git/)
+Swift Git provides a command-line interface similar to standard Git:
 
-## 📄 License
+### Initialize a Repository
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+```bash
+# Initialize in current directory
+swift-git init
 
-## ⭐ Star This Project
+# Initialize in specific directory
+swift-git init my-project
+```
 
-If you found this project helpful for learning Git internals, please consider giving it a star! ⭐
+This creates the following directory structure:
+```
+my-project/
+├── .swiftgit/           # Git metadata (equivalent to .git/)
+│   ├── objects/         # Object database
+│   ├── refs/
+│   │   ├── heads/       # Branch references
+│   │   └── tags/        # Tag references
+│   ├── HEAD             # Current branch pointer
+│   └── config           # Repository configuration
+├── file1.txt            # Working directory files
+└── file2.swift
+```
 
-Your support helps:
-- 📈 Increase visibility for other learners
-- 🎯 Encourage more educational content
-- 💪 Motivate further development
+### Stage Files
 
----
+```bash
+# Stage single file
+swift-git add main.swift
 
-**Happy Learning! 🚀**
+# Stage multiple files
+swift-git add main.swift helper.swift README.md
 
-*Built with ❤️ and Swift*
+# Stage all Swift files (shell expansion)
+swift-git add *.swift
+```
+
+### Create Commits
+
+```bash
+# Create commit with message
+swift-git commit -m "Add initial implementation"
+
+# Create commit with descriptive message
+swift-git commit --message "Fix bug in authentication logic"
+```
+
+## Git Concepts Explained
+
+### 1. Repository Structure
+
+A Git repository consists of:
+
+- **Working Directory**: Your project files
+- **Staging Area (Index)**: Snapshot of files ready for commit
+- **Object Database**: Compressed storage of all repository data
+- **References**: Pointers to commits (branches, tags)
+
+### 2. Git Objects
+
+Git uses three main object types:
+
+#### Blob Objects
+Store file content:
+```
+Content: "Hello, World!"
+SHA1: a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
+Storage: .swiftgit/objects/a1/b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
+```
+
+#### Tree Objects
+Represent directory structure:
+```
+100644 main.swift\0a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
+100644 README.md\0e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
+040000 src\0i9j0k1l2m3n4o5p6q7r8s9t0
+```
+
+#### Commit Objects
+Snapshot of repository state:
+```
+tree a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
+parent e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
+author John Doe <john@example.com> 1640995200 +0000
+committer John Doe <john@example.com> 1640995200 +0000
+
+Add user authentication feature
+```
+
+### 3. Staging Area (Index)
+
+The index is a binary file that tracks staged files:
+
+```
+Header (12 bytes):
+- Magic: "DIRC"
+- Version: 2
+- Entry count: N
+
+Entries (variable):
+- File metadata (size, time, permissions)
+- SHA1 hash
+- File path
+
+Footer:
+- SHA1 checksum
+```
+
+### 4. Object Storage
+
+Objects are stored using content-addressable storage:
+
+1. **Hash Calculation**: SHA1 hash of object content
+2. **Path Generation**: First 2 characters as directory, rest as filename
+3. **Compression**: zlib deflate compression
+4. **Storage**: `.swiftgit/objects/<hash-prefix>/<hash-suffix>`
+
+Example:
+```
+Content: "Hello, World!"
+SHA1: a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
+Path: .swiftgit/objects/a1/b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
+```
+
+## Implementation Details
+
+### Core Components
+
+#### GitRepository
+Main repository class that coordinates all operations:
+```swift
+let repo = GitRepository(path: "/path/to/project")
+try repo.initialize()  // Create new repository
+try repo.add(files: ["file1.txt"])  // Stage files
+try repo.commit(message: "Initial commit")  // Create commit
+```
+
+#### GitIndex
+Manages the staging area (index file):
+```swift
+let index = GitIndex(repository: repo)
+try index.addFile("main.swift")  // Stage file
+try index.read()  // Load from disk
+try index.write()  // Save to disk
+```
+
+#### GitIndexEntry
+Represents a single staged file:
+```swift
+let entry = GitIndexEntry(
+    path: "src/main.swift",
+    sha1: "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0",
+    size: 1024,
+    mtime: Date(),
+    mode: 100644,  // Regular file
+    stage: 0       // Normal stage
+)
+```
+
+### Command-Line Interface
+
+Built using Swift Argument Parser:
+```swift
+@main
+struct SwiftGit: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "swift-git",
+        abstract: "A Git implementation in Swift",
+        subcommands: [Init.self, Add.self, Commit.self]
+    )
+}
+```
+
+## Example Workflow
+
+Here's a complete example of using Swift Git:
+
+```bash
+# 1. Create a new project
+mkdir my-project
+cd my-project
+
+# 2. Initialize repository
+swift-git init
+
+# 3. Create some files
+echo "Hello, World!" > main.swift
+echo "# My Project" > README.md
+
+# 4. Stage files
+swift-git add main.swift README.md
+
+# 5. Create initial commit
+swift-git commit -m "Initial commit"
+
+# 6. Make changes
+echo "print(\"Hello, Swift!\")" >> main.swift
+
+# 7. Stage and commit changes
+swift-git add main.swift
+swift-git commit -m "Add Swift code"
+```
+
+## Differences from Standard Git
+
+This implementation focuses on educational value and includes several simplifications:
+
+- **Limited Commands**: Only `init`, `add`, and `commit`
+- **Single Branch**: Always uses `main` branch
+- **Basic Configuration**: Minimal config file
+- **No Merging**: No branch or merge support
+- **No Remote**: No remote repository support
+- **Simple Compression**: Basic zlib implementation
+
+## Learning Resources
+
+To understand Git internals better, check out:
+
+- [Git Internals - Plumbing and Porcelain](https://git-scm.com/book/en/v2/Git-Internals-Plumbing-and-Porcelain)
+- [Git Objects](https://git-scm.com/book/en/v2/Git-Internals-Git-Objects)
+- [Git References](https://git-scm.com/book/en/v2/Git-Internals-Git-References)
+- [The Git Index](https://git-scm.com/book/en/v2/Git-Internals-The-Git-Index)
+
+## Contributing
+
+This is an educational project. Feel free to:
+
+- Add new Git commands (checkout, branch, merge)
+- Improve error handling and edge cases
+- Add tests and documentation
+- Optimize performance
+- Implement additional Git features
+
+## License
+
+This project is for educational purposes. Feel free to use and modify as needed.
+
+## Acknowledgments
+
+- Inspired by the [Build Your Own X](https://github.com/codecrafters-io/build-your-own-x) project
+- Based on Git's internal design and file formats
+- Uses Swift Argument Parser for CLI handling
