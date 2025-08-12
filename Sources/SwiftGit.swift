@@ -74,8 +74,7 @@ struct SwiftGit: ParsableCommand {
  * 
  * Example usage:
  * ```bash
- * swift-git init              # Initialize in current directory
- * swift-git init my-project   # Initialize in specified directory
+ * swift-git init
  * ```
  * 
  * Directory structure created:
@@ -96,21 +95,6 @@ struct Init: ParsableCommand {
     )
     
     /**
-     * Directory to initialize the repository in.
-     * 
-     * Defaults to the current directory (".") if not specified.
-     * The repository will be created at `directory/.swiftgit/`.
-     * 
-     * Example:
-     * ```bash
-     * swift-git init -d /path/to/project
-     * # Creates repository at /path/to/project/.swiftgit/
-     * ```
-     */
-    @Option(name: .shortAndLong, help: "Directory to initialize")
-    var directory: String = "."
-    
-    /**
      * Execute the init command.
      * 
      * Creates a new GitRepository instance and initializes it,
@@ -119,7 +103,7 @@ struct Init: ParsableCommand {
      * @throws File system errors if directories cannot be created
      */
     mutating func run() throws {
-        let repository = GitRepository(path: directory)
+        let repository = GitRepository()
         try repository.initialize()
     }
 }
@@ -138,8 +122,9 @@ struct Init: ParsableCommand {
  * 
  * Example usage:
  * ```bash
- * swift-git add file.txt           # Stage single file
- * swift-git add *.swift            # Stage all Swift files
+ * swift-git add .                    # Stage all files in repository
+ * swift-git add src                 # Stage all files in src folder recursively
+ * swift-git add file.txt             # Stage single file
  * swift-git add file1.txt file2.swift  # Stage multiple files
  * ```
  * 
@@ -151,6 +136,8 @@ struct Init: ParsableCommand {
  * 
  * Note: Files must exist in the working directory to be staged.
  * Non-existent files will generate a warning but won't cause an error.
+ * The `.` pattern excludes the `.swiftgit` directory automatically.
+ * Folders are automatically detected and all their contents are added recursively.
  */
 struct Add: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -182,7 +169,7 @@ struct Add: ParsableCommand {
      * @throws File system errors if files cannot be read or written
      */
     mutating func run() throws {
-        let repository = GitRepository(path: ".")
+        let repository = GitRepository()
         try repository.add(files: files)
     }
 }
@@ -256,7 +243,7 @@ struct Commit: ParsableCommand {
      * @throws File system errors if objects cannot be created
      */
     mutating func run() throws {
-        let repository = GitRepository(path: ".")
+        let repository = GitRepository()
         try repository.commit(message: message)
     }
 }

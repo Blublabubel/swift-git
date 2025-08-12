@@ -3,43 +3,51 @@ import Foundation
 // MARK: - Git Repository Structure
 
 /**
- * GitRepository represents a Git repository and provides core Git functionality.
+ * GitRepository represents a Git repository and provides methods for Git operations.
  * 
  * A Git repository is a directory that contains:
- * - `.swiftgit/` directory (equivalent to `.git/` in standard Git)
- * - Working directory files
- * - Staging area (index)
- * - Object database
+ * - Working directory: The actual files you work with
+ * - .swiftgit/ directory: Contains all Git metadata and objects
+ * 
+ * Repository structure:
+ * ```
+ * my-project/
+ * ├── .swiftgit/           # Git repository data
+ * │   ├── objects/         # Object database (blobs, trees, commits)
+ * │   ├── refs/           # References (branches, tags)
+ * │   ├── HEAD            # Points to current branch
+ * │   └── index           # Staging area
+ * ├── src/                # Your source code
+ * ├── README.md           # Documentation
+ * └── main.swift          # Main file
+ * ```
  * 
  * Example usage:
  * ```swift
- * let repo = GitRepository(path: "/path/to/project")
- * try repo.initialize()  // Creates new repository
- * try repo.add(files: ["file1.txt", "file2.swift"])  // Stage files
- * try repo.commit(message: "Initial commit")  // Create commit
+ * let repo = GitRepository()
+ * try repo.initialize()  // Create new repository
+ * try repo.add(files: ["main.swift"])
+ * try repo.commit(message: "Initial commit")
  * ```
  */
 struct GitRepository {
-    /// The root path of the repository (working directory)
-    let path: String
-    
-    /// The path to the Git metadata directory (`.swiftgit/`)
+    /// Path to the .swiftgit directory (always in current directory)
     let gitDir: String
     
     /**
      * Initialize a new GitRepository instance.
      * 
-     * @param path The root directory path for the repository
+     * Creates a repository in the current directory.
+     * The .swiftgit directory will be created at ./.swiftgit/
      * 
      * Example:
      * ```swift
-     * let repo = GitRepository(path: "/Users/developer/my-project")
-     * // gitDir will be "/Users/developer/my-project/.swiftgit"
+     * let repo = GitRepository()
+     * // Repository will be created in current directory
      * ```
      */
-    init(path: String) {
-        self.path = path
-        self.gitDir = "\(path)/.swiftgit"
+    init() {
+        self.gitDir = ".swiftgit"
     }
     
     /**
@@ -113,6 +121,11 @@ struct GitRepository {
      * The staging area is a snapshot of the working directory that will be included
      * in the next commit. Files are stored as blob objects in the object database.
      * 
+     * Supported patterns:
+     * - Individual files: "main.swift", "src/helper.swift"
+     * - All files: "." (adds all files in working directory, excluding .swiftgit)
+     * - Folders: "src/" or "src" (adds all files in folder recursively)
+     * 
      * Git object types:
      * - **Blob**: File content (e.g., source code, text files)
      * - **Tree**: Directory structure (contains references to blobs and other trees)
@@ -121,17 +134,37 @@ struct GitRepository {
      * Example:
      * ```swift
      * let repo = GitRepository(path: ".")
-     * try repo.add(files: ["src/main.swift", "README.md"])
-     * // Files are now staged and ready for commit
+     * try repo.add(files: ["."])  // Add all files
+     * try repo.add(files: ["src/"])  // Add all files in src folder
+     * try repo.add(files: ["main.swift", "README.md"])  // Add specific files
      * ```
      * 
-     * @param files Array of file paths to add to staging area
+     * @param files Array of file paths or patterns to add to staging area
      * @throws File system errors if files cannot be read or written
      */
     func add(files: [String]) throws {
         let index = GitIndex(repository: self)
+        var allFilesToAdd: [String] = []
         
-        for file in files {
+        for pattern in files {
+            if pattern == "." {
+                // Add all files in working directory (excluding .swiftgit)
+                let allFiles = try getAllFilesInWorkingDirectory()
+                allFilesToAdd.append(contentsOf: allFiles)
+            } else if isDirectory(pattern) {
+                // Add all files in the specified directory recursively
+                let folderFiles = try getFilesInDirectory(pattern, recursive: true)
+                allFilesToAdd.append(contentsOf: folderFiles)
+            } else {
+                // Handle individual files
+                allFilesToAdd.append(pattern)
+            }
+        }
+        
+        // Remove duplicates and sort for consistent output
+        let uniqueFiles = Array(Set(allFilesToAdd)).sorted()
+        
+        for file in uniqueFiles {
             if FileManager.default.fileExists(atPath: file) {
                 try index.addFile(file)
                 print("Added '\(file)' to staging area")
@@ -463,5 +496,82 @@ struct GitRepository {
         let headContent = "ref: refs/heads/main\n"
         try headContent.write(toFile: "\(gitDir)/HEAD", atomically: true, encoding: .utf8)
         try commitHash.write(toFile: "\(gitDir)/refs/heads/main", atomically: true, encoding: .utf8)
+    }
+    
+    /**
+     * Get all files in the working directory, excluding .swiftgit.
+     * 
+     * @return Array of file paths in working directory
+     * @throws File system errors if directory cannot be read
+     */
+    private func getAllFilesInWorkingDirectory() throws -> [String] {
+        let fileManager = FileManager.default
+        let contents = try fileManager.contentsOfDirectory(atPath: ".")
+        
+        var allFiles: [String] = []
+        
+        for item in contents {                        
+            if isDirectory(item) {
+                // Recursively get files in subdirectory
+                let subFiles = try getFilesInDirectory(item, recursive: true)
+                allFiles.append(contentsOf: subFiles)
+            } else {
+                // Add individual file
+                allFiles.append(item)
+            }
+        }
+        
+        return allFiles
+    }
+    
+    /**
+     * Get all files in a directory, optionally recursively.
+     * 
+     * @param directoryPath Path to the directory
+     * @param recursive Whether to include files in subdirectories
+     * @return Array of file paths relative to repository root
+     * @throws File system errors if directory cannot be read
+     */
+    private func getFilesInDirectory(_ directoryPath: String, recursive: Bool) throws -> [String] {
+        let fileManager = FileManager.default
+        let contents = try fileManager.contentsOfDirectory(atPath: directoryPath)
+        
+        var files: [String] = []
+        
+        for item in contents {
+            let itemPath = "\(directoryPath)/\(item)"
+            
+            // Calculate relative path from repository root
+            let relativePath: String
+            if directoryPath == "." {
+                // If we're at the repository root, just use the item name
+                relativePath = item
+            } else {
+                // For subdirectories, the path is already relative
+                relativePath = itemPath
+            }
+            
+            if isDirectory(itemPath) && recursive {
+                // Recursively get files in subdirectory
+                let subFiles = try getFilesInDirectory(itemPath, recursive: true)
+                files.append(contentsOf: subFiles)
+            } else if !isDirectory(itemPath) {
+                // Add individual file
+                files.append(relativePath)
+            }
+        }
+        
+        return files
+    }
+    
+    /**
+     * Check if a path is a directory.
+     * 
+     * @param path Path to check
+     * @return True if path is a directory, false otherwise
+     */
+    private func isDirectory(_ path: String) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
     }
 }
