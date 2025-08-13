@@ -233,9 +233,10 @@ class GitIndex {
      * @param data Raw binary data from the index file
      * @throws GitError.invalidIndexFormat if the data is not a valid index file
      */
-    private func parseIndex(data: Data) throws {
+    internal func parseIndex(data: Data) throws {
         entries = []
 
+        // Ensure data is at least 12 bytes for header
         guard data.count >= 12 else {
             throw GitError.invalidIndexFormat
         }
@@ -243,14 +244,18 @@ class GitIndex {
         var offset = 0
 
         // Read header
-        let magic = data[offset ..< offset + 4]
-        guard String(data: magic, encoding: .ascii) == "DIRC" else {
+        let magicData = data.prefix(4)
+        let magic = String(data: magicData, encoding: .ascii)
+        guard magic == "DIRC" else {
             throw GitError.invalidIndexFormat
         }
         offset += 4
 
         // Read version
-        let _ = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
+        let version = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
+        guard version == 2 else {
+            throw GitError.invalidIndexFormat
+        }
         offset += 4
 
         let entryCount = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
@@ -298,53 +303,72 @@ class GitIndex {
      * @return Parsed GitIndexEntry
      * @throws GitError.invalidIndexFormat if entry cannot be parsed
      */
-    private func parseIndexEntry(data: Data, offset: inout Int) throws -> GitIndexEntry {
+    internal func parseIndexEntry(data: Data, offset: inout Int) throws -> GitIndexEntry {
         // Read entry header (62 bytes)
-        // ctime (4 bytes), ctime_nano (4 bytes), mtime (4 bytes), mtime_nano (4 bytes),
-        // dev (4 bytes), ino (4 bytes), mode (4 bytes), uid (4 bytes), gid (4 bytes),
-        // file_size (4 bytes)
+
+        // ctime (4 bytes)
         let _ = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
         offset += 4
+        
+        // ctime_nano (4 bytes)
         let _ = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
         offset += 4
+        
+        // mtime (4 bytes)
         let mtime = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
         offset += 4
+        
+        // mtime_nano (4 bytes)
         let _ = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
         offset += 4
+        
+        // dev (4 bytes)
         let _ = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
         offset += 4
+        
+        // ino (4 bytes)
         let _ = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
         offset += 4
+        
+        // mode (4 bytes)
         let mode = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
         offset += 4
+        
+        // uid (4 bytes)
         let _ = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
         offset += 4
+        
+        // gid (4 bytes)
         let _ = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
         offset += 4
+        
+        // file_size (4 bytes)
         let fileSize = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).bigEndian }
         offset += 4
 
         // Read SHA1 hash (20 bytes)
         guard offset + 20 <= data.count else { throw GitError.invalidIndexFormat }
         let sha1Data = data[offset ..< offset + 20]
-        let sha1 = sha1Data.map { String(format: "%02hhx", $0) }.joined()
+        let sha1 = sha1Data.hexString
         offset += 20
 
         // Read flags (2 bytes)
         guard offset + 2 <= data.count else { throw GitError.invalidIndexFormat }
         let flags = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt16.self).bigEndian }
         offset += 2
+        // Upper 2 bits (bits 14-15): Stage number (0-3)
         let stage = (flags >> 12) & 0x3
-        let nameLen = Int(flags & 0x0FFF)
+        // Lower 12 bits (bits 0-11): Path length (0-4095)
+        let pathLength = Int(flags & 0x0FFF)
 
-        // Read path: if nameLen < 0x0FFF, read exactly that many bytes; otherwise read until NUL
+        // Read path: if pathLength < 0x0FFF, read exactly that many bytes; otherwise read until NUL
         var path: String
-        if nameLen < 0x0FFF {
-            guard offset + nameLen <= data.count else { throw GitError.invalidIndexFormat }
-            let pathData = data[offset ..< offset + nameLen]
+        if pathLength < 0x0FFF {
+            guard offset + pathLength <= data.count else { throw GitError.invalidIndexFormat }
+            let pathData = data[offset ..< offset + pathLength]
             guard let pathStr = String(data: pathData, encoding: .utf8) else { throw GitError.invalidIndexFormat }
             path = pathStr
-            offset += nameLen
+            offset += pathLength
             // Read and consume the NUL terminator
             if offset < data.count, data[offset] == 0 { offset += 1 }
         } else {
@@ -358,14 +382,11 @@ class GitIndex {
             offset = end + 1 // consume NUL
         }
 
-        // Do NOT align here; outer loop aligns entries relative to file start
-        let mtimeDate = Date(timeIntervalSince1970: TimeInterval(mtime))
-
         return GitIndexEntry(
             path: path,
             sha1: sha1,
             size: Int(fileSize),
-            mtime: mtimeDate,
+            mtime: Date(timeIntervalSince1970: TimeInterval(mtime)),
             mode: mode,
             stage: UInt32(stage)
         )
@@ -380,7 +401,7 @@ class GitIndex {
      * @return Binary data representing the index file
      * @throws File system errors if serialization fails
      */
-    private func serializeIndex() throws -> Data {
+    internal func serializeIndex() throws -> Data {
         var data = Data()
 
         // Write header
@@ -393,6 +414,7 @@ class GitIndex {
             let entryBytes = try serializeIndexEntry(entry)
             data.append(entryBytes)
             // Add padding so that the next entry begins at 8-byte boundary from the start of the file
+            // Reason for padding: CPUs read 8-byte chunks efficiently
             let padding = (8 - (data.count % 8)) % 8
             if padding > 0 {
                 data.append(contentsOf: Array(repeating: UInt8(0), count: padding))
@@ -441,15 +463,12 @@ class GitIndex {
         // Write flags: upper 2 bits = stage (0..3), lower 12 bits = path length (capped at 0x0FFF)
         let pathData = entry.path.data(using: .utf8) ?? Data()
         let stageBits = UInt16(entry.stage & 0x3) << 12
-        let nameLen = UInt16(min(pathData.count, 0x0FFF))
-        let flags = stageBits | nameLen
+        let pathLength = UInt16(min(pathData.count, 0x0FFF))
+        let flags = stageBits | pathLength
         data.append(withUnsafeBytes(of: flags.bigEndian) { Data($0) })
-
-        // Write path (variable) followed by NUL terminator
         data.append(pathData)
         data.append(0)
 
-        // NOTE: Padding to 8-byte boundary relative to the start of the file is handled by serializeIndex()
         return data
     }
 }

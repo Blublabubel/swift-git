@@ -7,6 +7,12 @@ import CommonCrypto
 import Foundation
 import zlib
 
+extension Data {
+    var hexString: String {
+        map { String(format: "%02hhx", $0) }.joined()
+    }
+}
+
 /**
  * Calculate SHA1 hash of data.
  *
