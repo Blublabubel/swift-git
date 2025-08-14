@@ -9,10 +9,13 @@ Swift Git is an educational implementation of Git that provides basic version co
 ## Features
 
 - **Repository Initialization**: Create new Git repositories with proper directory structure
-- **File Staging**: Add files to the staging area (index)
+- **File Staging**: Add files to the staging area (index) with pattern support
 - **Commit Creation**: Create commits with full metadata and history
 - **Object Database**: Store blobs, trees, and commits using SHA1 hashing
-- **Binary Index Format**: Implement Git's index file format for staging area
+- **Binary Index Format**: Implement Git's index file format (v2) for staging area
+- **Recursive Tree Creation**: Handle nested directories of any depth
+- **Comprehensive Testing**: 34 unit tests with full coverage
+- **Performance Optimized**: 8-byte alignment, efficient algorithms
 
 ## Installation
 
@@ -31,27 +34,63 @@ cd swift-git
 # Build the project
 swift build
 
-# Run the executable
-swift run swift-git --help
+# Run the executable (Method 1: Using swift run)
+swift run SwiftGit --help
+
+# Or run the built executable directly (Method 2)
+.build/debug/SwiftGit --help
+
+# Run tests
+swift test
 ```
 
 ## Usage
 
-Swift Git provides a command-line interface similar to standard Git:
+Swift Git provides a command-line interface similar to standard Git. You can run it in two ways:
+
+### Method 1: Using `swift run` (Recommended for development)
+
+```bash
+# Show help
+swift run SwiftGit --help
+
+# Initialize a repository
+swift run SwiftGit init
+
+# Add files
+swift run SwiftGit add main.swift
+swift run SwiftGit add .
+
+# Create commit
+swift run SwiftGit commit -m "Initial commit"
+```
+
+### Method 2: Build and use executable
+
+```bash
+# Build the project
+swift build
+
+# Find the executable
+ls .build/debug/SwiftGit
+
+# Run the executable
+.build/debug/SwiftGit --help
+.build/debug/SwiftGit init
+.build/debug/SwiftGit add main.swift
+.build/debug/SwiftGit commit -m "Initial commit"
+```
 
 ### Initialize a Repository
 
 ```bash
 # Initialize in current directory
-swift-git init
-
-# Initialize in specific directory
-swift-git init my-project
+swift run SwiftGit init
 ```
 
 This creates the following directory structure:
 ```
-my-project/
+./
 ├── .swiftgit/           # Git metadata (equivalent to .git/)
 │   ├── objects/         # Object database
 │   ├── refs/
@@ -67,23 +106,23 @@ my-project/
 
 ```bash
 # Stage single file
-swift-git add main.swift
+swift run SwiftGit add main.swift
 
 # Stage multiple files
-swift-git add main.swift helper.swift README.md
+swift run SwiftGit add main.swift helper.swift README.md
 
-# Stage all Swift files (shell expansion)
-swift-git add *.swift
+# Stage all files in repository (excluding .swiftgit)
+swift run SwiftGit add .
 ```
 
 ### Create Commits
 
 ```bash
 # Create commit with message
-swift-git commit -m "Add initial implementation"
+swift run SwiftGit commit -m "Add initial implementation"
 
 # Create commit with descriptive message
-swift-git commit --message "Fix bug in authentication logic"
+swift run SwiftGit commit --message "Fix bug in authentication logic"
 ```
 
 ## Git Concepts Explained
@@ -141,7 +180,8 @@ Header (12 bytes):
 Entries (variable):
 - File metadata (size, time, permissions)
 - SHA1 hash
-- File path
+- File path with NUL termination
+- 8-byte alignment padding
 
 Footer:
 - SHA1 checksum
@@ -170,7 +210,7 @@ Path: .swiftgit/objects/a1/b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
 #### GitRepository
 Main repository class that coordinates all operations:
 ```swift
-let repo = GitRepository(path: "/path/to/project")
+let repo = GitRepository()
 try repo.initialize()  // Create new repository
 try repo.add(files: ["file1.txt"])  // Stage files
 try repo.commit(message: "Initial commit")  // Create commit
@@ -222,25 +262,52 @@ mkdir my-project
 cd my-project
 
 # 2. Initialize repository
-swift-git init
+swift run SwiftGit init
 
 # 3. Create some files
 echo "Hello, World!" > main.swift
 echo "# My Project" > README.md
+mkdir src
+echo "func helper() {}" > src/helper.swift
 
 # 4. Stage files
-swift-git add main.swift README.md
+swift run SwiftGit add main.swift README.md
+swift run SwiftGit add src  # Add entire directory
 
 # 5. Create initial commit
-swift-git commit -m "Initial commit"
+swift run SwiftGit commit -m "Initial commit"
 
 # 6. Make changes
 echo "print(\"Hello, Swift!\")" >> main.swift
 
 # 7. Stage and commit changes
-swift-git add main.swift
-swift-git commit -m "Add Swift code"
+swift run SwiftGit add .
+swift run SwiftGit commit -m "Add Swift code"
 ```
+
+## Technical Highlights
+
+### Performance Optimizations
+
+- **8-byte Memory Alignment**: CPU-friendly access patterns
+- **Efficient SHA1 Calculation**: Native CommonCrypto implementation
+- **Compressed Object Storage**: Zlib deflate algorithm
+- **Smart File Filtering**: Excludes build artifacts and system files
+
+### Git Index v2 Format
+
+- **Binary Format**: Efficient storage and parsing
+- **NUL-terminated Paths**: Proper string handling
+- **Flags Encoding**: Path length in 12-bit field (0x0FFF max)
+- **Memory Alignment**: 8-byte boundaries for performance
+- **Robust Parsing**: Bounds checking and error handling
+
+### Recursive Tree Creation
+
+- **Nested Directory Support**: Handles any depth of subdirectories
+- **Efficient Grouping**: Groups files by directory level
+- **Proper Tree Structure**: Creates intermediate tree objects
+- **Path Component Handling**: Splits paths correctly
 
 ## Differences from Standard Git
 
@@ -252,6 +319,24 @@ This implementation focuses on educational value and includes several simplifica
 - **No Merging**: No branch or merge support
 - **No Remote**: No remote repository support
 - **Simple Compression**: Basic zlib implementation
+
+## Project Structure
+
+```
+swift-git/
+├── Sources/
+│   ├── SwiftGit.swift      # Command-line interface
+│   ├── GitRepository.swift # Main repository logic
+│   ├── GitIndex.swift      # Staging area management
+│   ├── Utilities.swift     # Helper functions
+│   └── GitError.swift      # Custom error types
+├── Tests/
+│   └── SwiftGitTests/
+│       ├── GitIndexTests.swift    # Index functionality tests
+│       └── DataExtensionTests.swift # Utility function tests
+├── Package.swift           # Swift Package Manager config
+└── README.md              # This file
+```
 
 ## Learning Resources
 
